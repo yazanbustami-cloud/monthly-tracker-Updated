@@ -1099,7 +1099,7 @@ function rChurn(M){
 
 /* ---------- Unserved users tab ---------- */
 function unservedModel(){
-  const R = X.unserved.rows.map(r => ({type:String(r.row_type||'').trim(), d:toISO(r.period_start), z:String(r.zone||'').trim(), req:num(r.requesting_users), un:num(r.unserved_users), nh:num(r.no_history_users), fr:num(r.failed_requests), ndf:num(r.last_ndf), cu:num(r.last_canceled_by_user), cd:num(r.last_canceled_by_driver), co:num(r.last_canceled_by_other), lt:num(r.lost_trips_so_far), rt:num(r.lost_trips_at_risk), lg:num(r.lost_gmv_so_far), rg:num(r.lost_gmv_at_risk), ln:num(r.lost_net_rev_so_far), rn:num(r.lost_net_rev_at_risk)}));
+  const R = X.unserved.rows.map(r => ({type:String(r.row_type||'').trim(), d:toISO(r.period_start), z:String(r.zone||'').trim(), req:num(r.requesting_users), un:num(r.unserved_users), nh:num(r.no_history_users), fr:num(r.failed_requests), ndf:num(r.last_ndf), cu:num(r.last_canceled_by_user), cd:num(r.last_canceled_by_driver), co:num(r.last_canceled_by_other), lt:num(r.estimated_activity_gap_trips ?? r.lost_trips_so_far), rt:num(r.future_trips_at_risk ?? r.lost_trips_at_risk), lg:num(r.estimated_gmv_gap ?? r.lost_gmv_so_far), rg:num(r.future_gmv_at_risk ?? r.lost_gmv_at_risk), ln:num(r.estimated_net_revenue_gap ?? r.lost_net_rev_so_far), rn:num(r.future_net_revenue_at_risk ?? r.lost_net_rev_at_risk)}));
   const tot = rs => { const o = {}; ['req','un','nh','fr','ndf','cu','cd','co','lt','rt','lg','rg','ln','rn'].forEach(k => o[k] = sum(rs, r=>r[k])); o.pct = div(o.un, o.req); return o; };
   const by = t => R.filter(r=>r.type===t);
   return {R, tot, by};
@@ -1113,11 +1113,11 @@ function rUnserved(M){
   const dayRows = by('day'); const days = Array.from({length:31},(_,i)=>i+1);
   const dayPct = (ym,n) => { const rs = dayRows.filter(r=>r.d && ymOf(r.d)===ym && dnum(r.d)===n); return rs.length ? tot(rs).pct : null; };
   el.innerHTML = `
-  ${head('Unserved users', `Requested this period, completed nothing, and the last request ended cancelled or with no driver found. ${monthName(cm)} to date vs the same days of ${monthName(pm)}. Lost value = each user's completed trips last month × the share of the month elapsed, at their own average GMV and net revenue per trip; users with no history count as 1 trip.`)}
+  ${head('Unserved users', `Ride-hailing riders who requested this period, completed nothing, and whose last request ended cancelled or with no driver found. ${monthName(cm)} to date vs the same days of ${monthName(pm)}. Estimated activity gap = each rider's completed trips last month × the share of the month elapsed, at their own average GMV (canonical formula, after fees on user) and net revenue per trip; riders with no history count as 1 trip. Future at risk = the rest of the month. These are expected values, not measured losses.`)}
   <div class="grid g4">
     ${kpi('Unserved users this month', fI(c.un), `${fP(c.pct,2)} of ${fI(c.req)} requesting users · last month ${fP(p.pct,2)}`, null)}
-    ${kpi('Trips lost so far', fI(c.lt), `Last month same days ${fI(p.lt)} · at risk for the rest of the month ${fI(c.rt)}`, null)}
-    ${kpi('GMV lost so far (JD)', fJ(c.lg), `Net revenue ${fJ(c.ln)} JD · at risk ${fJ(c.rg)} JD GMV / ${fJ(c.rn)} JD net`, null)}
+    ${kpi('Estimated activity gap (trips)', fI(c.lt), `Last month same days ${fI(p.lt)} · future at risk this month ${fI(c.rt)}`, null)}
+    ${kpi('Estimated GMV gap (JD)', fJ(c.lg), `Net revenue gap ${fJ(c.ln)} JD · future at risk ${fJ(c.rg)} JD GMV / ${fJ(c.rn)} JD net`, null)}
     ${kpi('With no history last month', fP(div(c.nh,c.un),0), `${fI(c.nh)} new or returning users never got a trip`, null)}
   </div>
   <div class="grid g2" style="margin-top:14px">
@@ -1126,11 +1126,11 @@ function rUnserved(M){
       <div class="tw"><table><thead><tr><th>Outcome</th><th>${monthName(cm)}</th><th>Share</th><th>Last month same days</th><th>Share</th></tr></thead><tbody>
       ${[['Cancelled by rider','cu'],['Cancelled by driver','cd'],['No driver found','ndf'],['Cancelled, other','co']].map(([l,k])=>`<tr><td>${l}</td><td>${fI(c[k])}</td><td>${fP(div(c[k],c.un),1)}</td><td>${fI(p[k])}</td><td>${fP(div(p[k],p.un),1)}</td></tr>`).join('')}
       </tbody></table></div>
-      <div class="note">${monthName(pm)} full month: ${fI(f.un)} unserved users (${fP(f.pct,2)}), ${fI(f.lt)} trips and ${fJ(f.lg)} JD GMV lost.</div>
+      <div class="note">${monthName(pm)} full month: ${fI(f.un)} unserved users (${fP(f.pct,2)}), estimated gap ${fI(f.lt)} trips and ${fJ(f.lg)} JD GMV.</div>
     </div>
   </div>
   ${head('By zone', 'Users are counted in the zone of their last request, so rows add up.')}
-  <div class="panel tw" style="max-height:460px;overflow:auto"><table><thead><tr><th>Zone</th><th>Requesting users</th><th>Unserved</th><th>Unserved %</th><th>Last month</th><th>Driver cancel / no driver</th><th>Trips lost</th><th>GMV lost JD</th><th>Net revenue lost JD</th><th>At risk JD</th></tr></thead><tbody>
+  <div class="panel tw" style="max-height:460px;overflow:auto"><table><thead><tr><th>Zone</th><th>Requesting users</th><th>Unserved</th><th>Unserved %</th><th>Last month</th><th>Driver cancel / no driver</th><th>Gap trips</th><th>GMV gap JD</th><th>Net revenue gap JD</th><th>Future at risk JD</th></tr></thead><tbody>
   ${zones.map(z=>`<tr><td>${z.z}</td><td>${fI(z.a.req)}</td><td>${fI(z.a.un)}</td><td class="${z.a.pct>T.unserved_zone_amber && z.a.req>=T.min_zone_requesting_users?'st-r':''}"><b>${fP(z.a.pct,2)}</b></td><td>${fP(z.b.pct,2)}</td><td>${fI(z.a.cd)} / ${fI(z.a.ndf)}</td><td>${fI(z.a.lt)}</td><td>${fJ(z.a.lg)}</td><td>${fJ(z.a.ln)}</td><td>${fJ(z.a.rg)}</td></tr>`).join('')}
   <tr class="tot"><td>Total</td><td>${fI(c.req)}</td><td>${fI(c.un)}</td><td>${fP(c.pct,2)}</td><td>${fP(p.pct,2)}</td><td>${fI(c.cd)} / ${fI(c.ndf)}</td><td>${fI(c.lt)}</td><td>${fJ(c.lg)}</td><td>${fJ(c.ln)}</td><td>${fJ(c.rg)}</td></tr>
   </tbody></table></div>`;
@@ -1306,8 +1306,8 @@ function extraAlerts(M){
     if (ready('wow') && X.wow.rows.length) { const R = wowData(); const t = sum(R,r=>r.t), l = sum(R,r=>r.l); const c = chg(t,l);
       if (c!=null && c < T.wow_demand_amber) add(c < T.wow_demand_red ? 'red':'amber', 'Real demand below the same time last week', `${fI(t)} today up to ${String(R[0].cut||'').slice(0,5)} vs ${fI(l)} last week.`, fS(c,1), 'vs last week'); }
     if (ready('unserved')) { const {tot, by} = unservedModel(); const c = tot(by('current_mtd')), p = tot(by('prev_mtd'));
-      if (c.pct && p.pct && c.pct/p.pct > T.unserved_rise_amber) add('amber', 'Unserved users up vs last month', `${fP(c.pct,2)} of requesting users unserved MTD vs ${fP(p.pct,2)}; ${fJ(c.lg)} JD GMV lost so far.`, fS(c.pct/p.pct-1,0), 'vs last month');
-      [...new Set(by('current_mtd').map(r=>r.z))].forEach(z => { const a = tot(by('current_mtd').filter(r=>r.z===z)); if (a.req >= T.min_zone_requesting_users && a.pct > T.unserved_zone_amber) add('amber', `${z}: high unserved share`, `${fI(a.un)} of ${fI(a.req)} requesting users unserved MTD; ${fJ(a.lg)} JD GMV lost.`, fP(a.pct,1), 'unserved'); }); }
+      if (c.pct && p.pct && c.pct/p.pct > T.unserved_rise_amber) add('amber', 'Unserved users up vs last month', `${fP(c.pct,2)} of requesting users unserved MTD vs ${fP(p.pct,2)}; estimated GMV gap ${fJ(c.lg)} JD.`, fS(c.pct/p.pct-1,0), 'vs last month');
+      [...new Set(by('current_mtd').map(r=>r.z))].forEach(z => { const a = tot(by('current_mtd').filter(r=>r.z===z)); if (a.req >= T.min_zone_requesting_users && a.pct > T.unserved_zone_amber) add('amber', `${z}: high unserved share`, `${fI(a.un)} of ${fI(a.req)} requesting users unserved MTD; estimated GMV gap ${fJ(a.lg)} JD.`, fP(a.pct,1), 'unserved'); }); }
     if (ready('ratings')) { const {today, cm, pm, dn} = calCtx(); const S1 = X.ratings.rows.filter(r=>r.row_type==='summary').map(r=>({d:toISO(r.trip_date), rated:num(r.rated_trips), bad:num(r.bad_ratings)}));
       const a = S1.filter(r=>r.d && ymOf(r.d)===cm && r.d<today), b = S1.filter(r=>r.d && ymOf(r.d)===pm && dnum(r.d)<dn); const ra = div(sum(a,r=>r.bad),sum(a,r=>r.rated)), rb = div(sum(b,r=>r.bad),sum(b,r=>r.rated));
       if (ra && rb && ra/rb > T.bad_rating_rise_amber) add('amber', 'Bad-rating rate up vs last month', `${fP(ra,2)} of rated trips got 1–3 stars MTD vs ${fP(rb,2)} last month.`, fS(ra/rb-1,0), 'vs last month'); }
