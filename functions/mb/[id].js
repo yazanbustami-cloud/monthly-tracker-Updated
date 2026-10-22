@@ -21,6 +21,7 @@ const ALLOWED = new Set([
   '4117bdd6-03b6-4a3b-a6f9-0b686987d75a', // unserved (v1)
   'cef4ffc2-c0ad-4215-ad54-a3f4e64b5da2', // churnRisk (scoring v1)
   'b352a537-8903-46a0-8a50-ddd307330922', // promoRoi (v4)
+  'e78bf838-e2a9-4356-993b-e5219432b424', // hourly (today hourly v1)
   // Marketing & CS dashboard
   'be4148ba-35eb-4f05-bdb0-826be3a6c25d', // users
   '3db1b2bb-1b23-4626-8863-5bab1fb4f14c', // regs
