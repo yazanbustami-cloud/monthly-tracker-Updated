@@ -119,6 +119,7 @@ nav .navsep{flex:0 0 1px;background:rgba(255,255,255,.35);margin:9px 8px}
   <nav id="nav">
     <button data-tab="overview" class="on">Overview</button>
     <button data-tab="live">Today live</button>
+    <button data-tab="hourly">Today hourly</button>
     <button data-tab="daily">Daily</button>
     <button data-tab="weekly">Weekly</button>
     <button data-tab="zones">Zones</button>
@@ -141,6 +142,7 @@ nav .navsep{flex:0 0 1px;background:rgba(255,255,255,.35);margin:9px 8px}
   <div id="banners"></div>
   <section id="tab-overview"><div class="loading">Loading targets and Metabase data…</div></section>
   <section id="tab-live" class="hide"></section>
+  <section id="tab-hourly" class="hide"></section>
   <section id="tab-daily" class="hide"></section>
   <section id="tab-weekly" class="hide"></section>
   <section id="tab-zones" class="hide"></section>
@@ -689,10 +691,11 @@ const XS = {
   unserved:   {url:'https://analytics.riden.app/public/question/4117bdd6-03b6-4a3b-a6f9-0b686987d75a.csv', ttl:15, name:'Unserved users'},
   churn:      {url:'https://analytics.riden.app/public/question/9fd31937-06e7-47c3-87e0-d25c64aec450.csv', ttl:60, name:'Churned users'},
   churnRisk:  {url:'https://analytics.riden.app/public/question/cef4ffc2-c0ad-4215-ad54-a3f4e64b5da2.csv', ttl:60, name:'Churn risk'},
+  hourly:     {url:'https://analytics.riden.app/public/question/e78bf838-e2a9-4356-993b-e5219432b424.csv', ttl:5,  name:'Today hourly'},
   promoRoi:   {url:'https://analytics.riden.app/public/question/b352a537-8903-46a0-8a50-ddd307330922.csv', ttl:60, name:'Promo ROI'}
 };
 if (QS.get('src')) { const b = QS.get('src'); for (const k in XS) XS[k].url = b + k + '.csv'; }
-const TAB_NEEDS = {live:['dayHour','wow'], periods:['dayHour'], wow:['wow'], eta:['eta'], ratings:['ratings','badDrivers'], payments:['payments'], churn:['churn'], unserved:['unserved'], risk:['churnRisk'], promoroi:['promoRoi'], alerts:Object.keys(XS), overview:Object.keys(XS)};
+const TAB_NEEDS = {hourly:['hourly'], live:['dayHour','wow'], periods:['dayHour'], wow:['wow'], eta:['eta'], ratings:['ratings','badDrivers'], payments:['payments'], churn:['churn'], unserved:['unserved'], risk:['churnRisk'], promoroi:['promoRoi'], alerts:Object.keys(XS), overview:Object.keys(XS)};
 const X = {};
 let PZONE = 'All', PCM = null, RZONE = 'All';
 
@@ -879,36 +882,60 @@ function rWow(M){
 function rEta(M){
   const el = document.getElementById('tab-eta');
   if (!ready('eta')) { el.innerHTML = head('ETA page conversion') + waitMsg(['eta']); return; }
-  const R = X.eta.rows.map(r => ({d:toISO(r.local_date), z:String(r.zone||'').trim(), cut:r.cutoff_time, pv:num(r.eta_page_views), s:num(r.eta_sessions), u:num(r.eta_users), cs:num(r.converted_sessions), ct:num(r.converted_trips), cu:num(r.converted_users), comp:num(r.completed_sessions), s_tc:num(r.eta_sessions_tc), u_tc:num(r.eta_users_tc), cs_tc:num(r.converted_sessions_tc), cu_tc:num(r.converted_users_tc), comp_tc:num(r.completed_sessions_tc)})).filter(r=>r.d);
+  const R = X.eta.rows.map(r => ({d:toISO(r.local_date), z:String(r.zone||'').trim(), cut:r.cutoff_time, pv:num(r.eta_page_views), s:num(r.eta_sessions), u:num(r.eta_users), cs:num(r.converted_sessions), ct:num(r.converted_trips), cu:num(r.converted_users), comp:num(r.completed_sessions),
+    hasTcV: r.eta_page_views_tc != null && r.eta_page_views_tc !== '', pv_tc:num(r.eta_page_views_tc), ct_tc:num(r.converted_trips_tc), s_tc:num(r.eta_sessions_tc), u_tc:num(r.eta_users_tc), cs_tc:num(r.converted_sessions_tc), cu_tc:num(r.converted_users_tc), comp_tc:num(r.completed_sessions_tc)})).filter(r=>r.d);
   const today = R.reduce((a,r)=>r.d>a?r.d:a, ''); const lw = addDays(today,-7);
   const A = (d,z='All') => R.find(r=>r.d===d && r.z===z) || {};
   const t = A(today), l = A(lw); const cut = String(t.cut||'').slice(0,5);
-  const full = [...new Set(R.filter(r=>r.z==='All' && r.d<today).map(r=>r.d))].sort().slice(-28);
-  const sc = r => div(r.cs, r.s), uc = r => div(r.cu, r.u), ec = r => div(r.comp, r.s);
+  const tcV = R.some(r=>r.hasTcV);
+  /* full-day metrics */
+  const vc = r => div(r.ct, r.pv), sc = r => div(r.cs, r.s), uc = r => div(r.cu, r.u), ec = r => div(r.comp, r.s), vps = r => div(r.pv, r.s);
+  /* same-time metrics (views fall back to full day when the card has no _tc view columns) */
+  const vcT = r => tcV ? div(r.ct_tc, r.pv_tc) : div(r.ct, r.pv), pvT = r => tcV ? r.pv_tc : r.pv, ctT = r => tcV ? r.ct_tc : r.ct;
   const scT = r => div(r.cs_tc, r.s_tc), ucT = r => div(r.cu_tc, r.u_tc), ecT = r => div(r.comp_tc, r.s_tc);
-  const zones = [...new Set(R.filter(r=>r.d===today && r.z!=='All').map(r=>r.z))].map(z => ({z, t:A(today,z), l:A(lw,z)})).sort((a,b)=>(b.t.s_tc||0)-(a.t.s_tc||0));
+  const full = [...new Set(R.filter(r=>r.z==='All' && r.d<today).map(r=>r.d))].sort().slice(-28);
   const {cm} = calCtx(); const mtdDays = full.filter(d=>ymOf(d)===cm);
-  const mtdZ = z => { const rs = R.filter(r=>r.z===z && mtdDays.includes(r.d)); return div(sum(rs,r=>r.cs), sum(rs,r=>r.s)); };
+  const mtd = z => { const rs = R.filter(r=>r.z===z && mtdDays.includes(r.d)); const o = {pv:sum(rs,r=>r.pv), s:sum(rs,r=>r.s), ct:sum(rs,r=>r.ct), cs:sum(rs,r=>r.cs), comp:sum(rs,r=>r.comp)}; return {vc:div(o.ct,o.pv), sc:div(o.cs,o.s), ec:div(o.comp,o.s)}; };
+  const zones = [...new Set(R.filter(r=>r.d===today && r.z!=='All').map(r=>r.z))].map(z => ({z, t:A(today,z), l:A(lw,z), m:mtd(z)})).sort((a,b)=>(pvT(b.t)||0)-(pvT(a.t)||0));
+  const mA = mtd('All');
+  const dcell = (a,b) => { const d = dPP(a,b); return `<td class="${upGood(d)}">${fPP(d)}</td>`; };
   el.innerHTML = `
-  ${head('ETA page conversion', `A session = a user's price checks with gaps of 5 min or less. Converted = a trip request within 5 min of the last check (each trip counted once). Today up to <b>${cut}</b> vs the same time last ${dayName(lw)}.`)}
-  <div class="grid g4">
-    ${kpi('Session conversion', fP(scT(t),1), `Last week same time ${fP(scT(l),1)} (${fPP(dPP(scT(t),scT(l)))}) · ${fI(t.s_tc)} sessions`, null)}
-    ${kpi('User conversion', fP(ucT(t),1), `Last week ${fP(ucT(l),1)} (${fPP(dPP(ucT(t),ucT(l)))}) · ${fI(t.u_tc)} users checked prices`, null)}
-    ${kpi('Price check to completed trip', fP(ecT(t),1), `Last week ${fP(ecT(l),1)} (${fPP(dPP(ecT(t),ecT(l)))})`, null)}
-    ${kpi('Price checks per session', fJ(div(t.pv,t.s),2), `Users who never request today: ${fI((t.u_tc||0)-(t.cu_tc||0))}`, null)}
+  ${head('ETA page conversion', `<b>Price-check (view) conversion</b> = trips matched to a price check ÷ price checks (page views). <b>Session conversion</b> = sessions with a booking ÷ sessions, where a session is a rider's price checks 5 min or less apart. A trip matches when it is requested within 5 min of the last check; each trip counts once. Today up to <b>${cut}</b> vs the same time last ${dayName(lw)}.${tcV?'':' View conversion compares full days until the card has the <code>_tc</code> view columns.'}`)}
+  <div class="grid g3">
+    ${kpi('Price-check (view) conversion', fP(vcT(t),1), `${fI(ctT(t))} trips from ${fI(pvT(t))} price checks · last week ${fP(vcT(l),1)} (${fPP(dPP(vcT(t),vcT(l)))}) · MTD ${fP(mA.vc,1)}`, null)}
+    ${kpi('Session conversion', fP(scT(t),1), `${fI(t.cs_tc)} of ${fI(t.s_tc)} sessions booked · last week ${fP(scT(l),1)} (${fPP(dPP(scT(t),scT(l)))}) · MTD ${fP(mA.sc,1)}`, null)}
+    ${kpi('User conversion', fP(ucT(t),1), `${fI(t.cu_tc)} of ${fI(t.u_tc)} riders who checked prices booked · last week ${fP(ucT(l),1)} (${fPP(dPP(ucT(t),ucT(l)))})`, null)}
+    ${kpi('Price check to completed trip', fP(ecT(t),1), `Sessions ending in a completed trip · last week ${fP(ecT(l),1)} (${fPP(dPP(ecT(t),ecT(l)))}) · MTD ${fP(mA.ec,1)}`, null)}
+    ${kpi('Price checks per session', fJ(vps(t),2), `Last week ${fJ(vps(l),2)} · more checks per session = more hesitation`, null)}
+    ${kpi('Riders who checked but never booked', fI((t.u_tc||0)-(t.cu_tc||0)), `${fP(div((t.u_tc||0)-(t.cu_tc||0), t.u_tc),1)} of riders who checked prices today`, null)}
   </div>
   ${head('Daily conversion, last 4 weeks', 'Full days, all zones.')}
   <div class="panel"><div class="chartbox"><canvas id="cEta"></canvas></div></div>
-  ${head('By zone', 'Today and last week at the same time; month to date uses full days.')}
-  <div class="panel tw"><table><thead><tr><th>Zone</th><th>Sessions today</th><th>Session conv.</th><th>Last week</th><th>Change</th><th>User conv.</th><th>Last week</th><th>To completed</th><th>Session conv. MTD</th></tr></thead><tbody>
-  ${zones.map(r=>{ const d1 = dPP(scT(r.t),scT(r.l)); return `<tr><td>${r.z}</td><td>${fI(r.t.s_tc)}</td><td>${fP(scT(r.t),1)}</td><td>${fP(scT(r.l),1)}</td><td class="${upGood(d1)}">${fPP(d1)}</td><td>${fP(ucT(r.t),1)}</td><td>${fP(ucT(r.l),1)}</td><td>${fP(ecT(r.t),1)}</td><td>${fP(mtdZ(r.z),1)}</td></tr>`; }).join('')}
+  ${head('By zone: today vs last week, same time', 'Sorted by price checks today. Changes in percentage points.')}
+  <div class="panel tw" style="max-height:560px;overflow:auto"><table><thead><tr>
+    <th>Zone</th><th>Price checks</th><th>Sessions</th><th>Checks / session</th><th>Riders</th><th>Converted trips</th><th>Converted sessions</th><th>Converted riders</th><th>Completed sessions</th>
+    <th>View conv.</th><th>LW</th><th>Δ</th><th>Session conv.</th><th>LW</th><th>Δ</th><th>User conv.</th><th>LW</th><th>Δ</th><th>To completed</th><th>LW</th><th>Δ</th></tr></thead><tbody>
+  ${zones.map(r=>`<tr><td>${r.z}</td><td>${fI(pvT(r.t))}</td><td>${fI(r.t.s_tc)}</td><td>${fJ(vps(r.t),2)}</td><td>${fI(r.t.u_tc)}</td><td>${fI(ctT(r.t))}</td><td>${fI(r.t.cs_tc)}</td><td>${fI(r.t.cu_tc)}</td><td>${fI(r.t.comp_tc)}</td>
+    <td><b>${fP(vcT(r.t),1)}</b></td><td>${fP(vcT(r.l),1)}</td>${dcell(vcT(r.t),vcT(r.l))}
+    <td><b>${fP(scT(r.t),1)}</b></td><td>${fP(scT(r.l),1)}</td>${dcell(scT(r.t),scT(r.l))}
+    <td>${fP(ucT(r.t),1)}</td><td>${fP(ucT(r.l),1)}</td>${dcell(ucT(r.t),ucT(r.l))}
+    <td>${fP(ecT(r.t),1)}</td><td>${fP(ecT(r.l),1)}</td>${dcell(ecT(r.t),ecT(r.l))}</tr>`).join('')}
+  <tr class="tot"><td>All zones</td><td>${fI(pvT(t))}</td><td>${fI(t.s_tc)}</td><td>${fJ(vps(t),2)}</td><td>${fI(t.u_tc)}</td><td>${fI(ctT(t))}</td><td>${fI(t.cs_tc)}</td><td>${fI(t.cu_tc)}</td><td>${fI(t.comp_tc)}</td>
+    <td>${fP(vcT(t),1)}</td><td>${fP(vcT(l),1)}</td><td>${fPP(dPP(vcT(t),vcT(l)))}</td><td>${fP(scT(t),1)}</td><td>${fP(scT(l),1)}</td><td>${fPP(dPP(scT(t),scT(l)))}</td><td>${fP(ucT(t),1)}</td><td>${fP(ucT(l),1)}</td><td>${fPP(dPP(ucT(t),ucT(l)))}</td><td>${fP(ecT(t),1)}</td><td>${fP(ecT(l),1)}</td><td>${fPP(dPP(ecT(t),ecT(l)))}</td></tr>
+  </tbody></table></div>
+  <div class="note">Riders are counted per zone; a rider who checked prices in two zones appears in both, so zone rider counts do not add up to All zones.</div>
+  ${head('By zone: month to date', `Full days of ${monthName(cm)}.`)}
+  <div class="panel tw" style="max-height:460px;overflow:auto"><table><thead><tr><th>Zone</th><th>Price checks</th><th>Sessions</th><th>Converted trips</th><th>Converted sessions</th><th>View conv.</th><th>Session conv.</th><th>To completed</th></tr></thead><tbody>
+  ${zones.map(r => { const rs = R.filter(x=>x.z===r.z && mtdDays.includes(x.d)); return `<tr><td>${r.z}</td><td>${fI(sum(rs,x=>x.pv))}</td><td>${fI(sum(rs,x=>x.s))}</td><td>${fI(sum(rs,x=>x.ct))}</td><td>${fI(sum(rs,x=>x.cs))}</td><td><b>${fP(r.m.vc,1)}</b></td><td><b>${fP(r.m.sc,1)}</b></td><td>${fP(r.m.ec,1)}</td></tr>`; }).join('')}
   </tbody></table></div>`;
   chart('cEta', {type:'line', data:{labels:full.map(d=>`${dayName(d).slice(0,3)} ${shortD(d)}`), datasets:[
     {label:'User conversion', data:full.map(d=>uc(A(d))), borderColor:C.green, borderWidth:2, pointRadius:0},
     {label:'Session conversion', data:full.map(d=>sc(A(d))), borderColor:C.blue, borderWidth:3, pointRadius:0},
+    {label:'Price-check (view) conversion', data:full.map(d=>vc(A(d))), borderColor:C.indigo, borderWidth:2.5, pointRadius:0, borderDash:[2,3]},
     {label:'Price check to completed', data:full.map(d=>ec(A(d))), borderColor:C.orange, borderWidth:2, pointRadius:0, borderDash:[5,4]}
   ]}, options:{interaction:{mode:'index',intersect:false}, plugins:{legend:{position:'top',align:'end'}, tooltip:{callbacks:{label:x=>`${x.dataset.label}: ${fP(x.raw,1)}`}}}, scales:{x:gridX, y:{...gridY, ticks:{callback:v=>Math.round(v*100)+'%'}}}}});
 }
+
 
 /* ---------- Ratings tab ---------- */
 function rRatings(M){
@@ -1192,6 +1219,85 @@ function rPromoRoi(M){
     options:{indexAxis:'y', plugins:{legend:{display:false}, tooltip:{callbacks:{label:x=>`ROI ${fS(x.raw,0)} · cost ${fJ(top[x.dataIndex].cost)} JD`}}}, scales:{x:{grid:{color:'#EEEDF2'}, ticks:{callback:v=>Math.round(v*100)+'%'}}, y:{grid:{display:false}}}}});
 }
 
+/* ---------- Today hourly tab ---------- */
+let HZONE = 'All', HSEG = 'All';
+function rHourly(M){
+  const el = document.getElementById('tab-hourly'); const T = M.T;
+  if (!ready('hourly')) { el.innerHTML = head('Today hourly') + waitMsg(['hourly']); return; }
+  const R = X.hourly.rows.map(r => ({lab:String(r.day_label||'').trim(), d:toISO(r.local_date), h:num(r.hour), z:String(r.zone||'').trim(), s:String(r.user_segment||'').trim(), req:num(r.total_requests), rd:num(r.real_demand), comp:num(r.completed_trips), acc:num(r.accepted_requests), cu:num(r.canceled_by_user), cd:num(r.canceled_by_driver), ndf:num(r.no_driver_found), ru:num(r.requesting_users), cpu:num(r.completing_users), gmv:num(r.gmv), net:num(r.platform_net_revenue), promo:num(r.promo_spend), uni:num(r.uni_completed)})).filter(r=>r.d);
+  const today = (R.find(r=>r.lab==='today')||{}).d; const yday = (R.find(r=>r.lab==='yesterday')||{}).d; const lw = (R.find(r=>r.lab==='last_week')||{}).d;
+  if (!today) { el.innerHTML = head('Today hourly') + '<div class="panel empty">No request yet today.</div>'; return; }
+  const zones = [...new Set(R.map(r=>r.z))].sort((a,b)=>sum(R.filter(r=>r.z===b),r=>r.rd)-sum(R.filter(r=>r.z===a),r=>r.rd));
+  const segs = ['Active','Reactivated','New Registered','First Trip','Never Completed'];
+  const F = R.filter(r => (HZONE==='All' || r.z===HZONE) && (HSEG==='All' || r.s===HSEG));
+  const K = ['req','rd','comp','acc','cu','cd','ndf','gmv','net','promo','uni'];
+  const H = (lab, h) => { const o = {}; K.forEach(k=>o[k]=0); F.filter(r=>r.lab===lab && r.h===h).forEach(r=>K.forEach(k=>o[k]+=r[k])); return o; };
+  const hrs = Array.from({length:24},(_,i)=>i);
+  const tH = hrs.map(h=>H('today',h)), yH = hrs.map(h=>H('yesterday',h)), lH = hrs.map(h=>H('last_week',h));
+  const cutRaw = String((X.hourly.rows[0]||{}).data_cutoff || '').slice(0,5); const hasCut = /^\d{1,2}:\d{2}$/.test(cutRaw);
+  let [ch, cm] = (hasCut ? cutRaw : ammanTime()).split(':').map(Number);
+  const maxH = Math.max(...R.filter(r=>r.lab==='today').map(r=>r.h), 0);
+  if (!hasCut && (QS.get('asof') || ch < maxH)) { ch = maxH; cm = 30; }
+  const frac = cm/60;
+  const soFar = (arr, k) => sum(arr.slice(0,ch), x=>x[k]) + (arr[ch] ? arr[ch][k]*frac : 0);
+  const done = (arr, k) => sum(arr.slice(0,ch+1), x=>x[k]);
+  /* targets */
+  const inMonth = M.liveDate === today; const w = hourW(M.hours, today);
+  const dayRD = !inMonth ? null : HSEG!=='All' ? (HZONE==='All' && M.segT[HSEG] ? M.segT[HSEG].day[today] : null) : HZONE==='All' ? M.platT[today] : (M.zT[HZONE] ? M.zT[HZONE].day[today] : null);
+  const dayP = !inMonth ? null : HSEG!=='All' ? (HZONE==='All' && M.segT[HSEG] ? M.segT[HSEG].pday[today] : null) : HZONE==='All' ? M.platP[today] : (M.pT[HZONE] ? M.pT[HZONE].day[today] : null);
+  const dayU = inMonth && HZONE==='All' && HSEG==='All' ? M.uniDayT[today] : null;
+  const share = sum(w.slice(0,ch)) + w[ch]*frac;
+  const hT = h => dayRD==null ? null : dayRD*w[h];
+  const rdNow = done(tH,'rd'), rdExp = dayRD==null ? null : dayRD*share, rdLW = soFar(lH,'rd'), rdY = soFar(yH,'rd');
+  const cNow = done(tH,'comp'), cLW = soFar(lH,'comp');
+  const pNow = done(tH,'promo'), pExp = dayP==null ? null : dayP*share, pLW = soFar(lH,'promo');
+  const uNow = done(tH,'uni'), uExp = dayU ? dayU*share : null, uLW = soFar(lH,'uni');
+  const gNow = done(tH,'gmv'), gLW = soFar(lH,'gmv'), nNow = done(tH,'net'), nLW = soFar(lH,'net');
+  const cur = tH[ch], curLW = lH[ch];
+  const vs = (a,b) => `<b class="${upGood(chg(a,b))}">${fS(chg(a,b),1)}</b>`;
+  const filt = `${HZONE==='All'?'All zones':HZONE}${HSEG==='All'?'':' · '+HSEG}`;
+  el.innerHTML = `
+  ${head(`<span class="live-dot"></span>Today hourly: ${dayName(today)} ${shortD(today)}`, `Hour = hour of the request, Amman time; real demand counts a session in the hour it started (same 5-minute rule as the tracker). Data up to <b>${pad(ch)}:${pad(cm)}</b>${hasCut?' (latest request in the card)':' (clock time; add data_cutoff to the card for exact timing)'}. Comparisons use the same time on ${dayName(yday)} and last ${dayName(lw)}: full hours before ${pad(ch)}:00 plus ${cm} minutes of the current hour, pro rata. The current hour's completion is still filling in. ${inMonth?'Targets = daily target × Hour Weights ('+(isWknd(today)?'weekend':'weekday')+' curve).':'No target for this month is loaded, so only comparisons are shown.'}`)}
+  <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap"><span class="note" style="margin:0">Zone</span>${zoneSel('hZone', zones, HZONE)}<span class="note" style="margin:0 0 0 8px">Segment</span><select id="hSeg" class="sel">${['All',...segs].map(s=>`<option${s===HSEG?' selected':''}>${s}</option>`).join('')}</select></div>
+  <div class="grid g3">
+    ${kpi(`Real demand to ${pad(ch)}:${pad(cm)}`, fI(rdNow), `${rdExp!=null?`Expected ${fI(rdExp)} · <b>${fP(div(rdNow,rdExp),1)}</b> of pace · `:''}last week ${fI(rdLW)} ${vs(rdNow,rdLW)} · yesterday ${fI(rdY)}`, rdExp!=null?div(rdNow,rdExp):null, paceCls(div(rdNow,rdExp),T))}
+    ${kpi('Completed trips', fI(cNow), `Completion ${fP(div(cNow,done(tH,'req')),1)} of requests · last week ${fI(cLW)} ${vs(cNow,cLW)}`, null)}
+    ${kpi('Promo spend (JD)', fJ(pNow), `${pExp!=null?`Budget so far ${fJ(pExp)} · <b>${fP(div(pNow,pExp),0)}</b> · `:''}last week ${fJ(pLW)} ${vs(pNow,pLW)} · ${fJ(div(pNow,rdNow),3)} JD per demand`, pExp!=null?div(pNow,pExp):null, promoCls(div(pNow,pExp),T))}
+    ${kpi('University completed', fI(uNow), `${uExp!=null?`Expected ${fI(uExp)} · <b>${fP(div(uNow,uExp),0)}</b> · `:''}last week ${fI(uLW)} ${vs(uNow,uLW)}`, uExp?div(uNow,uExp):null, paceCls(uExp?div(uNow,uExp):null,T))}
+    ${kpi('GMV / net revenue (JD)', fJ(gNow), `Net ${fJ(nNow)} · last week GMV ${fJ(gLW)} ${vs(gNow,gLW)}, net ${fJ(nLW)} ${vs(nNow,nLW)}`, null)}
+    ${kpi(`Current hour ${pad(ch)}:00 (${cm} min in)`, fI(cur.rd), `${hT(ch)!=null?`Expected so far ${fI(hT(ch)*frac)} · `:''}last week same minutes ${fI(curLW.rd*frac)} ${vs(cur.rd,curLW.rd*frac)} · completion ${fP(div(cur.comp,cur.req),1)}`, null)}
+  </div>
+  <div class="panel" style="margin-top:14px"><div class="seg-h"><h3>Real demand by hour: ${filt}</h3></div><div class="chartbox"><canvas id="cHourly"></canvas></div></div>
+  ${head('Hour by hour', 'Current hour shown as is (partial); its attainment is against the minutes elapsed. Acceptance = requests with an accepted dispatch.')}
+  <div class="panel tw"><table><thead><tr><th>Hour</th><th>Target</th><th>Real demand</th><th>Attain.</th><th>Yesterday</th><th>Last week</th><th>vs LW</th><th>Completed</th><th>Completion</th><th>Acceptance</th><th>Rider cancel</th><th>Driver cancel</th><th>No driver</th><th>Promo JD</th><th>JD / demand</th><th>GMV JD</th><th>Uni</th></tr></thead><tbody>
+  ${hrs.filter(h=>h<=ch).reverse().map(h => { const t = tH[h], l = lH[h], y = yH[h]; const isCur = h===ch; const tg = hT(h); const att = tg ? div(t.rd, isCur ? tg*frac : tg) : null; const lwc = isCur ? l.rd*frac : l.rd;
+    return `<tr><td>${pad(h)}:00${isCur?' <span class="live-dot"></span>':''}</td><td>${tg!=null?fI(tg):'–'}</td><td><b>${fI(t.rd)}</b></td><td class="st-${paceCls(att,T)}">${fP(att,0)}</td><td>${fI(y.rd)}</td><td>${fI(l.rd)}</td><td class="${upGood(chg(t.rd,lwc))}">${fS(chg(t.rd,lwc),1)}</td><td>${fI(t.comp)}</td><td>${fP(div(t.comp,t.req),1)}</td><td>${fP(div(t.acc,t.req),1)}</td><td>${fI(t.cu)}</td><td>${fI(t.cd)}</td><td class="${t.ndf>0?'st-r':''}">${fI(t.ndf)}</td><td>${fJ(t.promo)}</td><td>${fJ(div(t.promo,t.rd),3)}</td><td>${fJ(t.gmv)}</td><td>${fI(t.uni)}</td></tr>`; }).join('')}
+  <tr class="tot"><td>Today so far</td><td>${rdExp!=null?fI(rdExp):'–'}</td><td>${fI(rdNow)}</td><td>${fP(div(rdNow,rdExp),1)}</td><td>${fI(rdY)}</td><td>${fI(rdLW)}</td><td>${fS(chg(rdNow,rdLW),1)}</td><td>${fI(cNow)}</td><td>${fP(div(cNow,done(tH,'req')),1)}</td><td>${fP(div(done(tH,'acc'),done(tH,'req')),1)}</td><td>${fI(done(tH,'cu'))}</td><td>${fI(done(tH,'cd'))}</td><td>${fI(done(tH,'ndf'))}</td><td>${fJ(pNow)}</td><td>${fJ(div(pNow,rdNow),3)}</td><td>${fJ(gNow)}</td><td>${fI(uNow)}</td></tr>
+  </tbody></table></div>
+  ${head('Zones by hour', inMonth ? `Real demand ÷ the zone's hourly target. Zones with a monthly target of at least ${fI(T.min_zone_demand_target)}. Current hour against minutes elapsed.` : 'Real demand ÷ the same hour last week (no target loaded).')}
+  <div class="panel tw"><table class="heat"><thead><tr><th style="text-align:left">Zone</th>${hrs.filter(h=>h<=ch).map(h=>`<th>${pad(h)}</th>`).join('')}</tr></thead><tbody>
+  ${zones.filter(z => inMonth ? (M.zT[z] && M.zT[z].total >= T.min_zone_demand_target) : sum(R.filter(r=>r.z===z && r.lab==='last_week'),r=>r.rd) >= 500).map(z => `<tr><td>${z}</td>${hrs.filter(h=>h<=ch).map(h => { const f = h===ch ? frac : 1;
+      const a = sum(R.filter(r=>r.z===z && r.lab==='today' && r.h===h && (HSEG==='All'||r.s===HSEG)), r=>r.rd);
+      const base = inMonth ? M.zT[z].day[today]*w[h]*f : sum(R.filter(r=>r.z===z && r.lab==='last_week' && r.h===h && (HSEG==='All'||r.s===HSEG)), r=>r.rd)*f;
+      const p = div(a, base); return `<td style="background:${heatColor(p)}" title="${z} ${pad(h)}:00: ${fI(a)} / ${fI(base)}">${p==null?'':Math.round(p*100)}</td>`; }).join('')}</tr>`).join('')}
+  </tbody></table></div>
+  ${head('Segments by hour', 'Real demand per segment, today. Never Completed = requesting users who have never completed a trip.')}
+  <div class="panel tw"><table><thead><tr><th>Segment</th>${hrs.filter(h=>h<=ch).map(h=>`<th>${pad(h)}</th>`).join('')}<th>Total</th><th>Completion</th><th>Promo JD</th><th>vs LW (same time)</th></tr></thead><tbody>
+  ${segs.map(s => { const rs = R.filter(r=>r.s===s && (HZONE==='All'||r.z===HZONE)); const at = h => sum(rs.filter(r=>r.lab==='today'&&r.h===h),r=>r.rd); const tot = sum(rs.filter(r=>r.lab==='today'),r=>r.rd);
+      const lwS = sum(rs.filter(r=>r.lab==='last_week' && r.h<ch),r=>r.rd) + sum(rs.filter(r=>r.lab==='last_week' && r.h===ch),r=>r.rd)*frac;
+      const comp = sum(rs.filter(r=>r.lab==='today'),r=>r.comp), req = sum(rs.filter(r=>r.lab==='today'),r=>r.req);
+      return `<tr><td${s==='Never Completed'?' class="st-r"':''}>${s}</td>${hrs.filter(h=>h<=ch).map(h=>`<td>${fI(at(h))}</td>`).join('')}<td><b>${fI(tot)}</b></td><td>${fP(div(comp,req),1)}</td><td>${fJ(sum(rs.filter(r=>r.lab==='today'),r=>r.promo))}</td><td class="${upGood(chg(tot,lwS))}">${fS(chg(tot,lwS),1)}</td></tr>`; }).join('')}
+  </tbody></table></div>`;
+  const zs = document.getElementById('hZone'); if (zs) zs.onchange = () => { HZONE = zs.value; rHourly(M); };
+  const ss = document.getElementById('hSeg'); if (ss) ss.onchange = () => { HSEG = ss.value; rHourly(M); };
+  chart('cHourly', {data:{labels:hrs.map(h=>pad(h)+':00'), datasets:[
+    ...(dayRD!=null ? [{type:'line', label:'Target', data:hrs.map(h=>hT(h)), borderColor:C.orange, borderWidth:2, borderDash:[5,4], pointRadius:0}] : []),
+    {type:'line', label:`Last week (${shortD(lw)})`, data:lH.map(x=>x.rd), borderColor:C.granite, borderWidth:2, pointRadius:0},
+    {type:'line', label:`Yesterday (${shortD(yday)})`, data:yH.map(x=>x.rd), borderColor:C.silver, borderWidth:2, pointRadius:0},
+    {type:'bar', label:'Today', data:tH.map((x,h)=>h<=ch?x.rd:null), backgroundColor:hrs.map(h=>h===ch?'rgba(4,60,161,.45)':C.blue), borderRadius:3}
+  ]}, options:{interaction:{mode:'index',intersect:false}, plugins:{legend:{position:'top',align:'end'}, tooltip:{callbacks:{label:x=>`${x.dataset.label}: ${fI(x.raw)}`}}}, scales:{x:{...gridX,ticks:{maxTicksLimit:12}}, y:gridY}}});
+}
+
 /* ---------- alerts from diagnostics ---------- */
 function extraAlerts(M){
   const A = [], T = M.T; const cat = 'Service & retention';
@@ -1228,7 +1334,7 @@ function renderAll(){
   document.getElementById('banners').innerHTML = B.join('');
   document.getElementById('subtitle').textContent = `Demand & growth tracker, ${monthLabel(M)}`;
   updateBadge();
-  const fns = {overview:()=>rOverview(M,A), live:()=>rLive(M), daily:()=>rDaily(M), weekly:()=>rWeekly(M), zones:()=>rZones(M), segments:()=>rSegments(M), unis:()=>rUnis(M), alerts:()=>rAlerts(M,A),
+  const fns = {overview:()=>rOverview(M,A), live:()=>rLive(M), hourly:()=>rHourly(M), daily:()=>rDaily(M), weekly:()=>rWeekly(M), zones:()=>rZones(M), segments:()=>rSegments(M), unis:()=>rUnis(M), alerts:()=>rAlerts(M,A),
     wow:()=>rWow(M), periods:()=>rPeriods(M), eta:()=>rEta(M), unserved:()=>rUnserved(M), ratings:()=>rRatings(M), payments:()=>rPayments(M), churn:()=>rChurn(M), risk:()=>rRisk(M), promoroi:()=>rPromoRoi(M)};
   Object.keys(charts).forEach(kill);
   try { fns[TAB](); } catch(e){ console.error(e); document.getElementById('tab-'+TAB).innerHTML = `<div class="banner err">Could not draw this page: ${e.message}</div>`; }
